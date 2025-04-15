@@ -3,34 +3,14 @@ require('dotenv').config(); // Load .env file first!
 const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
-// We will configure the Google strategy in the next step
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const path = require('path'); // Import path module
-const mongoose = require('mongoose'); // Require mongoose
-
-// --- Database Connection ---
-mongoose.connect(process.env.MONGODB_URI, {
-  // Remove deprecated options: useNewUrlParser and useUnifiedTopology
-  // Mongoose 6+ handles these automatically
-})
-.then(() => console.log('MongoDB connected successfully.'))
-.catch(err => console.error('MongoDB connection error:', err));
-
-// --- User Schema and Model ---
-const userSchema = new mongoose.Schema({
-    googleId: { type: String, required: true, unique: true },
-    displayName: String,
-    email: String,
-    image: String,
-    // Add other fields you might want to store
-});
-const User = mongoose.model('User', userSchema);
+const path = require('path');
 
 const app = express();
 
 // --- Session Configuration ---
 app.use(session({
-    secret: process.env.SESSION_SECRET, // Use secret from .env
+    secret: process.env.SESSION_SECRET, // Reads from environment variable
     resave: false,
     saveUninitialized: true,
     cookie: { 
@@ -46,66 +26,42 @@ app.use(passport.session());
 
 // --- Google OAuth 2.0 Strategy Configuration ---
 passport.use(new GoogleStrategy({
-    clientID: process.env.GOOGLE_CLIENT_ID,       // Use client ID from .env
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET, // Use client secret from .env
-    callbackURL: "/auth/google/callback",         // The callback route
-    scope: [ 'profile', 'email' ]                 // Request profile and email
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: "/auth/google/callback",
+    scope: [ 'profile', 'email' ]
   },
-  async (accessToken, refreshToken, profile, cb) => { // Make callback async
-    // Verify callback: Check email domain AND find/create user in DB
+  (accessToken, refreshToken, profile, cb) => { // Revert callback (no async, no DB logic)
+    // Verify callback: Check if the user's email is allowed
     const email = profile.emails && profile.emails.length > 0 ? profile.emails[0].value : null;
     const allowedDomain1 = "@ds.study.iitm.ac.in";
     const allowedDomain2 = "@es.study.iitm.ac.in";
 
     console.log("Verifying email:", email);
 
-    // 1. Check domain first
-    if (!email || !(email.endsWith(allowedDomain1) || email.endsWith(allowedDomain2))) {
+    // Check if the email ends with either of the allowed domains
+    if (email && (email.endsWith(allowedDomain1) || email.endsWith(allowedDomain2))) {
+      // Email domain is allowed, proceed with login
+      console.log("Email allowed.");
+      return cb(null, profile); // Pass the original Google profile
+    } else {
+      // Email domain is not allowed
       console.log(`Email denied. Only ${allowedDomain1} or ${allowedDomain2} are allowed.`);
       return cb(null, false, { message: 'Access denied. Only specific email domains are allowed.' });
-    }
-
-    // 2. Domain allowed, find or create user in DB
-    try {
-        let user = await User.findOne({ googleId: profile.id });
-
-        if (user) {
-            // User found
-            console.log("User found in DB:", user.displayName);
-            return cb(null, user); // Pass DB user object
-        } else {
-            // User not found, create new user
-            const newUser = new User({
-                googleId: profile.id,
-                displayName: profile.displayName,
-                email: email, // Use the verified email
-                image: profile.photos && profile.photos.length > 0 ? profile.photos[0].value : null
-            });
-            await newUser.save();
-            console.log("New user created:", newUser.displayName);
-            return cb(null, newUser); // Pass newly created DB user object
-        }
-    } catch (err) {
-        console.error("Error during DB user find/create:", err);
-        return cb(err, null); // Pass error to Passport
     }
   }
 ));
 
 // --- User Serialization/Deserialization ---
-// Stores user's MongoDB _id in the session
+// Stores user info (just the Google profile for now) in the session
 passport.serializeUser((user, done) => {
-  done(null, user.id); // user.id is the shortcut for user._id from Mongoose
+  done(null, user); // Store the whole profile object
 });
 
-// Retrieves user info from the DB using the ID stored in the session
-passport.deserializeUser(async (id, done) => {
-    try {
-        const user = await User.findById(id);
-        done(null, user); // Attach the mongoose user object to req.user
-    } catch (err) {
-        done(err, null);
-    }
+// Retrieves user info from the session
+passport.deserializeUser((obj, done) => {
+  // obj is the Google profile stored in the session
+  done(null, obj); // Attach profile object to req.user
 });
 
 // --- Static Files ---
