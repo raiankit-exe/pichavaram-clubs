@@ -6,6 +6,25 @@ const passport = require('passport');
 // We will configure the Google strategy in the next step
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const path = require('path'); // Import path module
+const mongoose = require('mongoose'); // Require mongoose
+
+// --- Database Connection ---
+mongoose.connect(process.env.MONGODB_URI, {
+  // Remove deprecated options: useNewUrlParser and useUnifiedTopology
+  // Mongoose 6+ handles these automatically
+})
+.then(() => console.log('MongoDB connected successfully.'))
+.catch(err => console.error('MongoDB connection error:', err));
+
+// --- User Schema and Model ---
+const userSchema = new mongoose.Schema({
+    googleId: { type: String, required: true, unique: true },
+    displayName: String,
+    email: String,
+    image: String,
+    // Add other fields you might want to store
+});
+const User = mongoose.model('User', userSchema);
 
 const app = express();
 
@@ -32,46 +51,66 @@ passport.use(new GoogleStrategy({
     callbackURL: "/auth/google/callback",         // The callback route
     scope: [ 'profile', 'email' ]                 // Request profile and email
   },
-  function(accessToken, refreshToken, profile, cb) {
-    // Verify callback: Check if the user's email is allowed
+  async (accessToken, refreshToken, profile, cb) => { // Make callback async
+    // Verify callback: Check email domain AND find/create user in DB
     const email = profile.emails && profile.emails.length > 0 ? profile.emails[0].value : null;
-    // Define the allowed domains
-    const allowedDomain1 = "@ds.study.iitm.ac.in"; 
+    const allowedDomain1 = "@ds.study.iitm.ac.in";
     const allowedDomain2 = "@es.study.iitm.ac.in";
 
     console.log("Verifying email:", email);
 
-    // Check if the email ends with either of the allowed domains
-    if (email && (email.endsWith(allowedDomain1) || email.endsWith(allowedDomain2))) {
-      // Email domain is allowed, proceed with login
-      console.log("Email allowed.");
-      // You might want to find or create a user in your database here.
-      return cb(null, profile); // Pass the profile to serializeUser
-    } else {
-      // Email domain is not allowed
+    // 1. Check domain first
+    if (!email || !(email.endsWith(allowedDomain1) || email.endsWith(allowedDomain2))) {
       console.log(`Email denied. Only ${allowedDomain1} or ${allowedDomain2} are allowed.`);
-      // Pass false to indicate authentication failure
-      return cb(null, false, { message: 'Access denied. Only specific email domains are allowed.' }); 
+      return cb(null, false, { message: 'Access denied. Only specific email domains are allowed.' });
+    }
+
+    // 2. Domain allowed, find or create user in DB
+    try {
+        let user = await User.findOne({ googleId: profile.id });
+
+        if (user) {
+            // User found
+            console.log("User found in DB:", user.displayName);
+            return cb(null, user); // Pass DB user object
+        } else {
+            // User not found, create new user
+            const newUser = new User({
+                googleId: profile.id,
+                displayName: profile.displayName,
+                email: email, // Use the verified email
+                image: profile.photos && profile.photos.length > 0 ? profile.photos[0].value : null
+            });
+            await newUser.save();
+            console.log("New user created:", newUser.displayName);
+            return cb(null, newUser); // Pass newly created DB user object
+        }
+    } catch (err) {
+        console.error("Error during DB user find/create:", err);
+        return cb(err, null); // Pass error to Passport
     }
   }
 ));
 
 // --- User Serialization/Deserialization ---
-// Stores user info (just the Google profile for now) in the session
+// Stores user's MongoDB _id in the session
 passport.serializeUser((user, done) => {
-  done(null, user);
+  done(null, user.id); // user.id is the shortcut for user._id from Mongoose
 });
 
-// Retrieves user info from the session
-passport.deserializeUser((obj, done) => {
-  // In a real app, you might use the ID stored in 'obj' (from serializeUser)
-  // to fetch the full user details from your database.
-  done(null, obj);
+// Retrieves user info from the DB using the ID stored in the session
+passport.deserializeUser(async (id, done) => {
+    try {
+        const user = await User.findById(id);
+        done(null, user); // Attach the mongoose user object to req.user
+    } catch (err) {
+        done(err, null);
+    }
 });
 
 // --- Static Files ---
 // Serve frontend files (HTML, CSS, JS)
-app.use(express.static(__dirname)); // Serve files from the project root
+app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Routes ---
 
