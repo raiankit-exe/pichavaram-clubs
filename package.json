@@ -1,0 +1,19 @@
+{
+  "name": "pich_club-main",
+  "version": "1.0.0",
+  "description": "This is a simple website with Google Form integration. The website features a modern, responsive design and includes a Google Form embedded in the page.",
+  "main": "script.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-session": "^1.18.1",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0"
+  }
+}
