@@ -167,11 +167,11 @@ app.get('/logout', (req, res, next) => {
     });
 });
 
-// --- Server Start --- COMMENTED OUT FOR VERCEL
-const port = process.env.PORT || 3000; 
+// --- Server Start --- // (Keep existing uncommented listen block for Render)
+const port = process.env.PORT || 3000;
 app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
 });
 
-// --- Export the Express app for Vercel ---
-module.exports = app; 
+// --- Export the Express app for Vercel --- // Remove this line
+// module.exports = app; 
